@@ -101,7 +101,12 @@ fn generate_rows(
         .collect()
 }
 
-fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool) -> Table<'a> {
+fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool, is_chinese: bool) -> Table<'a> {
+    let headers = if is_chinese {
+        ["服务单元 (UNIT)", "运行状态 (ACTIVE)", "自启状态 (FILE)", "加载状态 (LOAD)", "服务描述 (DESCRIPTION)"]
+    } else {
+        ["Name", "Active", "State", "Load", "Description"]
+    };
     let mut table = Table::new(
         rows.to_owned(),
         [
@@ -113,7 +118,7 @@ fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool) -> Table<'a>
         ],
     )
     .header(
-        Row::new(["Name", "Active", "State", "Load", "Description"]).style(
+        Row::new(headers).style(
             Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
@@ -218,6 +223,7 @@ pub struct TableServices {
     workers_shutdown: Arc<AtomicBool>,
     query_listener_handle: Option<JoinHandle<()>>,
     timestamp_worker_handle: Option<JoinHandle<()>>,
+    pub is_chinese: bool,
 }
 
 impl TableServices {
@@ -262,10 +268,24 @@ impl TableServices {
             workers_shutdown: Arc::new(AtomicBool::new(false)),
             query_listener_handle: None,
             timestamp_worker_handle: None,
+            is_chinese: false,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_chinese(&mut self, is_chinese: bool) {
+        self.is_chinese = is_chinese;
+    }
+
+    pub fn select_service_by_name(&mut self, name: &str) {
+        if let Some(index) = self.filtered_services.iter().position(|s| s.name() == name) {
+            self.table_state.select(Some(index));
+            self.selected_service_name = Some(name.to_string());
         }
     }
 
     pub fn init(&mut self, config: &Config) {
+        self.is_chinese = config.language.is_chinese();
         let _ = self.fetch_services();
         self.spawn_query_listener();
         self.spawn_timestamp_worker();
@@ -362,7 +382,7 @@ impl TableServices {
             .map(|states| generate_rows(&self.filtered_services, Some(&states), service_uptime))
             .unwrap_or_else(|| generate_rows(&self.filtered_services, None, service_uptime));
 
-        let table = generate_table(&rows, self.ignore_key_events);
+        let table = generate_table(&rows, self.ignore_key_events, self.is_chinese);
         frame.render_stateful_widget(&table, area, &mut self.table_state);
     }
 
@@ -663,6 +683,14 @@ impl TableServices {
                 self.dispatch(Actions::ShowHelp);
                 return;
             }
+            KeyCode::Char('n') => {
+                self.dispatch(Actions::GoCreate);
+                return;
+            }
+            KeyCode::Delete => {
+                self.dispatch(Actions::PromptUninstall);
+                return;
+            }
             _ => {}
         }
 
@@ -901,16 +929,24 @@ impl TableServices {
     pub fn shortcuts(&self) -> Vec<Line<'_>> {
         let mut help_text: Vec<Line<'_>> = Vec::new();
         if !self.ignore_key_events {
+            let header = if self.is_chinese {
+                "选中服务的快捷操作指令"
+            } else {
+                "Actions on the selected service"
+            };
             help_text.push(Line::from(Span::styled(
-                "Actions on the selected service",
+                header,
                 Style::default()
                     .fg(Color::LightMagenta)
                     .add_modifier(Modifier::BOLD),
             )));
 
-            help_text.push(Line::from(
-                "Navigate: ↑/↓ | Switch tab: ←/→ | Start: s | Stop: x | Restart: r | Enable: e | Disable: d | List all units: f | Filter: a | Mask/Unmask: m | Refresh: u | Log: v | Unit File: c | Help: ?"
-            ));
+            let shortcuts_text = if self.is_chinese {
+                "导航: ↑/↓ | 切换Tab: ←/→ | 启动: s | 停止: x | 重启: r | 自启: e | 禁用自启: d | 新建: n | 卸载: Del | 全部: f | 状态筛选: a | 屏蔽: m | 刷新: u | 日志: v | 单元文件: c | 帮助: ?"
+            } else {
+                "Navigate: ↑/↓ | Switch tab: ←/→ | Start: s | Stop: x | Restart: r | Enable: e | Disable: d | New: n | Delete: Del | List all: f | Filter: a | Mask: m | Refresh: u | Log: v | Unit File: c | Help: ?"
+            };
+            help_text.push(Line::from(shortcuts_text));
         }
 
         help_text

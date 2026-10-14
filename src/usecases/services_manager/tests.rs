@@ -267,3 +267,41 @@ fn service_sorting_is_case_insensitive() {
 
     assert_eq!(names, ["alpha.service", "Beta.service", "Zulu.service"]);
 }
+
+#[test]
+fn create_service_executes_full_combo() {
+    let fake = FakeRepository::default();
+    let observer = fake.clone();
+    let manager = ServicesManager::new(Box::new(fake));
+
+    let config = crate::domain::service_unit::ServiceUnitConfig {
+        service_name: "test-svc".into(),
+        exec_start: "/usr/bin/test".into(),
+        enable_on_boot: true,
+        start_immediately: true,
+        ..Default::default()
+    };
+
+    let result = manager.create_service(&config).unwrap();
+    assert_eq!(result, "test-svc.service");
+    assert_eq!(
+        observer.calls(),
+        [
+            "create_file:test-svc.service",
+            "reload:",
+            "enable:test-svc.service",
+            "start:test-svc.service"
+        ]
+    );
+}
+
+#[test]
+fn uninstall_service_delegates_to_repository() {
+    let fake = FakeRepository::default();
+    let observer = fake.clone();
+    let manager = ServicesManager::new(Box::new(fake));
+
+    manager.uninstall_service("my-app.service").unwrap();
+    assert_eq!(observer.calls(), ["uninstall:my-app.service"]);
+}
+

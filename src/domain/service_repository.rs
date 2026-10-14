@@ -24,4 +24,10 @@ pub trait ServiceRepository: Send + Sync {
     fn change_connection(&mut self, connection_type: ConnectionType) -> Result<(), Box<dyn Error>>;
     fn systemctl_cat(&self, name: &str) -> Result<String, Box<dyn Error>>;
     fn get_active_enter_timestamp(&self, name: &str) -> Result<u64, Box<dyn Error>>;
+    fn create_service_file(
+        &self,
+        config: &crate::domain::service_unit::ServiceUnitConfig,
+    ) -> Result<(), Box<dyn Error>>;
+    fn uninstall_service(&self, name: &str) -> Result<(), Box<dyn Error>>;
+    fn get_unit_file_path(&self, name: &str) -> Option<std::path::PathBuf>;
 }

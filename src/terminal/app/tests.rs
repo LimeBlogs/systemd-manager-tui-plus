@@ -349,3 +349,25 @@ fn editor_errors_use_event_queue_and_error_popup_renders_without_reading_input()
     assert!(text.contains("editor unavailable"));
     assert!(text.contains("Press any key to dismiss"));
 }
+
+#[test]
+fn submitting_user_service_switches_tab_and_connection_to_session() {
+    let (mut app, observer) = test_app_with_repository(FakeRepository::default());
+    assert_eq!(app.active_connection, ConnectionType::System);
+    assert_eq!(app.selected_tab_index, 0);
+
+    let mut form = CreateServiceForm::new(true, ServiceScope::User);
+    form.service_name.set_value("my-user-daemon");
+    form.exec_start.set_value("/usr/bin/my-daemon");
+    app.create_form = Some(form);
+    app.status = Status::Create;
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 35)).unwrap();
+    let key = KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE);
+    app.handle_create_key(key, &mut terminal).unwrap();
+
+    assert_eq!(app.active_connection, ConnectionType::Session);
+    assert_eq!(app.selected_tab_index, 1);
+    assert_eq!(app.status, Status::Log);
+    assert!(observer.calls().contains(&"create_file:my-user-daemon.service".to_string()));
+}

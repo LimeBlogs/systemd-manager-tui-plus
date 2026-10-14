@@ -75,6 +75,7 @@ pub struct ServiceLog {
     auto_refresh_worker: Option<LogRefreshWorker>,
     usecase: Rc<RefCell<ServicesManager>>,
     log: String,
+    pub is_chinese: bool,
 }
 
 struct LogRefreshWorker {
@@ -93,7 +94,12 @@ impl ServiceLog {
             auto_refresh_worker: None,
             usecase,
             log: String::new(),
+            is_chinese: false,
         }
+    }
+
+    pub fn set_chinese(&mut self, is_chinese: bool) {
+        self.is_chinese = is_chinese;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -194,24 +200,30 @@ impl ServiceLog {
 
     pub fn shortcuts(&self) -> Vec<Line<'_>> {
         let is_refreshing = self.auto_refresh.lock().map(|r| *r).unwrap_or(false);
-        let mut auto_refresh_label = "Enable auto-refresh";
-        if is_refreshing {
-            auto_refresh_label = "Disable auto-refresh";
-        }
+        let header = if self.is_chinese { "快捷操作" } else { "Actions" };
+        let auto_refresh_label = if self.is_chinese {
+            if is_refreshing { "暂停自动刷新" } else { "开启自动刷新" }
+        } else if is_refreshing {
+            "Disable auto-refresh"
+        } else {
+            "Enable auto-refresh"
+        };
 
-        let help_text = vec![
+        let hint = if self.is_chinese {
+            format!("滚动: ↑/↓ | 切换Tab: ←/→ | {auto_refresh_label}: a | 返回列表: q/Esc")
+        } else {
+            format!("Scroll: ↑/↓ | Switch tabs: ←/→ | {auto_refresh_label}: a | Go back: q/Esc")
+        };
+
+        vec![
             Line::from(vec![Span::styled(
-                "Actions",
+                header,
                 Style::default()
                     .fg(Color::LightMagenta)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from(format!(
-                "Scroll: ↑/↓ | Switch tabs: ←/→ | {auto_refresh_label}: a | Go back: q/Esc",
-            )),
-        ];
-
-        help_text
+            Line::from(hint),
+        ]
     }
 
     pub fn reset(&mut self) {

@@ -188,6 +188,31 @@ impl ServicesManager {
     pub fn repository_handle(&self) -> Arc<Mutex<Box<dyn ServiceRepository>>> {
         Arc::clone(&self.repository)
     }
+
+    pub fn create_service(
+        &self,
+        config: &crate::domain::service_unit::ServiceUnitConfig,
+    ) -> Result<String, Box<dyn Error>> {
+        self.repository()?.create_service_file(config)?;
+        self.repository()?.reload_daemon()?;
+        let unit_name = config.unit_file_name();
+        if config.enable_on_boot {
+            let _ = self.repository()?.enable_service(&unit_name);
+        }
+        if config.start_immediately {
+            let _ = self.repository()?.start_service(&unit_name);
+        }
+        Ok(unit_name)
+    }
+
+    pub fn uninstall_service(&self, name: &str) -> Result<(), Box<dyn Error>> {
+        self.repository()?.uninstall_service(name)?;
+        Ok(())
+    }
+
+    pub fn get_unit_file_path(&self, name: &str) -> Option<std::path::PathBuf> {
+        self.repository().ok()?.get_unit_file_path(name)
+    }
 }
 
 impl Drop for ServicesManager {

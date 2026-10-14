@@ -8,7 +8,8 @@ use futures_lite::{StreamExt, future};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{self};
+use std::io;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -543,6 +544,79 @@ impl ServiceRepository for SystemdServiceAdapter {
         )?;
         let timestamp: u64 = variant.try_into()?;
         Ok(timestamp)
+    }
+
+    fn create_service_file(
+        &self,
+        config: &crate::domain::service_unit::ServiceUnitConfig,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let dir = match config.scope {
+            crate::domain::service_unit::ServiceScope::System => PathBuf::from("/etc/systemd/system"),
+            crate::domain::service_unit::ServiceScope::User => {
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_else(|_| ".".into());
+                PathBuf::from(home).join(".config/systemd/user")
+            }
+        };
+        std::fs::create_dir_all(&dir)?;
+        let file_path = dir.join(config.unit_file_name());
+        let content = config.generate_unit_content();
+        std::fs::write(&file_path, content)?;
+        Ok(())
+    }
+
+    fn get_unit_file_path(&self, name: &str) -> Option<PathBuf> {
+        let dir = match self.active_connection {
+            ConnectionType::System => PathBuf::from("/etc/systemd/system"),
+            ConnectionType::Session => {
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_else(|_| ".".into());
+                PathBuf::from(home).join(".config/systemd/user")
+            }
+        };
+        let file_name = if name.ends_with(".service") {
+            name.to_string()
+        } else {
+            format!("{name}.service")
+        };
+        let file_path = dir.join(file_name);
+        if file_path.exists() {
+            Some(file_path)
+        } else {
+            None
+        }
+    }
+
+    fn uninstall_service(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let file_path = self.get_unit_file_path(name).ok_or_else(|| {
+            format!(
+                "Unit file for '{name}' was not found in custom unit directory. Only custom units can be uninstalled."
+            )
+        })?;
+
+        // 1. Stop service if running (ignore errors)
+        let _ = self.stop_service(name);
+
+        // 2. Disable service if enabled (ignore errors)
+        let _ = self.disable_service(name);
+
+        // 3. Remove the unit file
+        std::fs::remove_file(&file_path)?;
+
+        // 4. Reload systemd daemon
+        self.reload_daemon()?;
+
+        // 5. Reset-failed best effort
+        let mut cmd = Command::new("systemctl");
+        cmd.arg("reset-failed");
+        if matches!(self.active_connection, ConnectionType::Session) {
+            cmd.arg("--user");
+        }
+        let _ = cmd.arg(name).output();
+
+        Ok(())
     }
 }
 

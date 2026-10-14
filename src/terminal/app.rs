@@ -28,10 +28,13 @@ use std::{
 
 use crate::Config;
 use crate::domain::connection_type::ConnectionType;
+use crate::domain::service_unit::ServiceScope;
 use crate::infrastructure::systemd_service_adapter::CompletedOperation;
 use crate::terminal::components::list::ActiveFilterState;
 use crate::usecases::services_manager::ServicesManager;
 
+use super::components::confirm_dialog::{ConfirmDialog, ConfirmResult};
+use super::components::create_service::{CreateServiceForm, CreateServiceResult};
 use super::components::details::ServiceDetails;
 use super::components::filter::{Filter, InputMode};
 use super::components::list::{ServiceAction, TableServices};
@@ -39,11 +42,12 @@ use super::components::log::ServiceLog;
 
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Status {
     List,
     Log,
     Details,
+    Create,
 }
 
 pub enum Actions {
@@ -53,6 +57,8 @@ pub enum Actions {
     ResetList,
     GoLog,
     GoDetails,
+    GoCreate,
+    PromptUninstall,
     UpdateLog(ServiceRequestContext, String),
     #[allow(dead_code)]
     UpdateDetails,
@@ -78,8 +84,27 @@ pub enum AppEvent {
     Error(String),
 }
 
-fn get_user_friendly_error(error: &str) -> &str {
-    if error.contains("org.freedesktop.DBus.Error.InteractiveAuthorizationRequired") {
+#[allow(dead_code)]
+pub fn get_user_friendly_error(error: &str) -> &str {
+    get_user_friendly_error_i18n(error, false)
+}
+
+pub fn get_user_friendly_error_i18n(error: &str, is_chinese: bool) -> &str {
+    if is_chinese {
+        if error.contains("org.freedesktop.DBus.Error.InteractiveAuthorizationRequired") {
+            "操作权限不足，请尝试使用 sudo 重新运行本程序！"
+        } else if error.contains("org.freedesktop.DBus.Error.ServiceUnknown") {
+            "请求的服务不存在或未运行。"
+        } else if error.contains("org.freedesktop.DBus.Error.NoReply") {
+            "服务未及时响应，可能正忙或运行异常。"
+        } else if error.contains("org.freedesktop.DBus.Error.AccessDenied") {
+            "访问被拒绝，当前账户权限不足。"
+        } else if error.contains("org.freedesktop.systemd1.NoSuchUnit") {
+            "请求的系统服务单元不存在。"
+        } else {
+            error
+        }
+    } else if error.contains("org.freedesktop.DBus.Error.InteractiveAuthorizationRequired") {
         "You do not have the permission to do that. Try running the program with sudo."
     } else if error.contains("org.freedesktop.DBus.Error.ServiceUnknown") {
         "The requested service is not available or not running."
@@ -111,6 +136,9 @@ pub struct App {
     active_connection: ConnectionType,
     show_help: bool,
     errors: VecDeque<String>,
+    create_form: Option<CreateServiceForm>,
+    confirm_dialog: Option<ConfirmDialog>,
+    pub is_chinese: bool,
 }
 
 impl App {
@@ -140,10 +168,16 @@ impl App {
             active_connection: ConnectionType::System,
             show_help: false,
             errors: VecDeque::new(),
+            create_form: None,
+            confirm_dialog: None,
+            is_chinese: false,
         }
     }
 
     pub fn init(&mut self, config: Config) {
+        self.is_chinese = config.language.is_chinese();
+        self.service_log.set_chinese(self.is_chinese);
+        self.details.set_chinese(self.is_chinese);
         self.table_service.init(&config);
         let _ = self
             .event_tx
@@ -207,6 +241,7 @@ impl App {
                     Status::Log => self.draw_log_status(terminal)?,
                     Status::List => self.draw_list_status(terminal)?,
                     Status::Details => self.draw_details_status(terminal)?,
+                    Status::Create => self.draw_create_status(terminal)?,
                 }
             }
 
@@ -225,11 +260,16 @@ impl App {
 
             match event {
                 AppEvent::Key(key)
-                    if !self.errors.is_empty() || self.table_service.has_instance_prompt() =>
+                    if !self.errors.is_empty()
+                        || self.confirm_dialog.is_some()
+                        || self.table_service.has_instance_prompt() =>
                 {
                     self.handle_modal_key(key, terminal)?;
                 }
                 AppEvent::Key(key) => match self.status {
+                    Status::Create => {
+                        self.handle_create_key(key, terminal)?;
+                    }
                     Status::Log => {
                         if self.show_help {
                             self.show_help = false;
@@ -268,6 +308,34 @@ impl App {
                         }
                     }
                 },
+                AppEvent::Action(Actions::GoCreate) => {
+                    let default_scope = match self.active_connection {
+                        ConnectionType::Session => ServiceScope::User,
+                        ConnectionType::System => ServiceScope::System,
+                    };
+                    let mut form = CreateServiceForm::new(self.is_chinese, default_scope);
+                    form.set_chinese(self.is_chinese);
+                    self.create_form = Some(form);
+                    self.status = Status::Create;
+                }
+                AppEvent::Action(Actions::PromptUninstall) => {
+                    if let Some(service) = self.table_service.get_selected_service() {
+                        let name = service.name();
+                        if let Some(path) = self.usecases.borrow().get_unit_file_path(name) {
+                            self.confirm_dialog = Some(ConfirmDialog::new(
+                                name,
+                                path.to_string_lossy(),
+                                self.is_chinese,
+                            ));
+                        } else {
+                            self.report_error(if self.is_chinese {
+                                "无法卸载：仅支持删除位于 /etc/systemd/system/ (或会话目录) 下的自定义服务，系统内置服务受保护不可删除。"
+                            } else {
+                                "Cannot uninstall: only custom unit files in /etc/systemd/system/ (or session path) can be removed."
+                            })?;
+                        }
+                    }
+                }
                 AppEvent::Action(Actions::ServiceAction(action)) => {
                     self.table_service.act_on_selected_service(&action);
                     self.table_service.invalidate_timestamp();
@@ -434,80 +502,82 @@ impl App {
 
         frame.render_widget(Clear, popup_area);
 
+        let title = if self.is_chinese { "SYSTEMD 管理终端 (TUI) - 快捷键帮助" } else { "SYSTEMD MANAGER TUI - HELP" };
+        let nav_title = if self.is_chinese { "导航操作:" } else { "Navigation:" };
+        let filter_title = if self.is_chinese { "搜索过滤:" } else { "Filter:" };
+        let control_title = if self.is_chinese { "服务控制:" } else { "Service Control:" };
+        let view_title = if self.is_chinese { "列表视图与过滤:" } else { "View & Filter list:" };
+        let info_title = if self.is_chinese { "详细信息:" } else { "Information:" };
+        let app_title = if self.is_chinese { "程序全局:" } else { "Application:" };
+        let close_hint = if self.is_chinese { "按 ? 或任意键关闭此窗口" } else { "Press ? or any key to close" };
+
         let text = vec![
             Line::from(vec![Span::styled(
-                "SYSTEMD MANAGER TUI - HELP",
+                title,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )]),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Navigation:",
+                nav_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("↑/k - Move up    ↓/j - Move down"),
-            Line::from("←/h - Previous tab    →/l - Next tab"),
-            Line::from("PageUp/PageDown - Jump 10 items"),
+            Line::from(if self.is_chinese { "↑/k - 向上移动    ↓/j - 向下移动" } else { "↑/k - Move up    ↓/j - Move down" }),
+            Line::from(if self.is_chinese { "←/h - 上一个标签页    →/l - 下一个标签页" } else { "←/h - Previous tab    →/l - Next tab" }),
+            Line::from(if self.is_chinese { "PageUp/PageDown - 快速翻页 (10项)" } else { "PageUp/PageDown - Jump 10 items" }),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Filter:",
+                filter_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("Ctrl+u - Delete until the start of the input "),
-            Line::from("Ctrl+k - Delete until the end of the input "),
-            Line::from("Alt+b or Ctrl+← - Go backwards a word "),
-            Line::from("Alt+f or Ctrl+→ - Go fowards a word "),
-            Line::from("Ctrl+e or End - Go to the end of the input "),
-            Line::from("Ctrl+a or Home - Go to the end of input  "),
-            Line::from("Ctrl+w or Ctrl+Backspace - Delete a word backwards "),
+            Line::from(if self.is_chinese { "Ctrl+u - 删除至开头" } else { "Ctrl+u - Delete until the start of the input" }),
+            Line::from(if self.is_chinese { "Ctrl+k - 删除至末尾" } else { "Ctrl+k - Delete until the end of the input" }),
+            Line::from(if self.is_chinese { "Alt+b / Ctrl+← - 向左跳转词    Alt+f / Ctrl+→ - 向右跳转词" } else { "Alt+b or Ctrl+← - Go backwards a word    Alt+f or Ctrl+→ - Go forwards a word" }),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Service Control:",
+                control_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("s - Start service    x - Stop service"),
-            Line::from("r - Restart service"),
-            Line::from("e - Enable service    d - Disable service"),
-            Line::from("m - Mask/Unmask selected unit or template"),
-            Line::from("Templates (@.): s/x/r/e/d ask for an instance name"),
+            Line::from(if self.is_chinese { "s - 启动服务    x - 停止服务    r - 重启服务" } else { "s - Start service    x - Stop service    r - Restart service" }),
+            Line::from(if self.is_chinese { "e - 启用开机自启    d - 禁用开机自启    m - 屏蔽/解除屏蔽" } else { "e - Enable service    d - Disable service    m - Mask/Unmask" }),
+            Line::from(if self.is_chinese { "n - ✨ 新建系统服务 (.service)" } else { "n - Create new systemd service (.service)" }),
+            Line::from(if self.is_chinese { "Del - 🗑️ 卸载并删除自定义服务配置文件" } else { "Del - Uninstall selected custom service file" }),
+            Line::from(if self.is_chinese { "模板 (@.): s/x/r/e/d 提示输入实例名称" } else { "Templates (@.): s/x/r/e/d ask for an instance name" }),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "View & Filter list:",
+                view_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("f - Toggle all/services filter"),
-            Line::from("a - Cycle filter (all→active→inactive→failed)"),
-            Line::from("u - Refresh service list"),
+            Line::from(if self.is_chinese { "f - 切换所有单元/仅服务    a - 循环切换状态过滤" } else { "f - Toggle all/services filter    a - Cycle filter state" }),
+            Line::from(if self.is_chinese { "u - 重新读取服务列表" } else { "u - Refresh service list" }),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Information:",
+                info_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("v - View service logs"),
-            Line::from("c - View unit file details"),
+            Line::from(if self.is_chinese { "v - 查看实时日志 (journalctl)    c - 查看单元配置 (cat)" } else { "v - View service logs    c - View unit file details" }),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Application:",
+                app_title,
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("Ctrl+z - Suspend"),
-            Line::from("Ctrl+c - Quit"),
+            Line::from("Ctrl+z - Suspend    Ctrl+c - Quit"),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Press ? or any key to close",
+                close_hint,
                 Style::default().fg(Color::Gray),
             )]),
         ];
@@ -519,7 +589,7 @@ impl App {
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(Color::Cyan))
                     .padding(Padding::new(1, 1, 0, 0))
-                    .title("Help"),
+                    .title(if self.is_chinese { "帮助" } else { "Help" }),
             )
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: true });
@@ -545,9 +615,96 @@ impl App {
     ) -> Result<()> {
         if !self.errors.is_empty() {
             self.handle_error_key(key, terminal)
+        } else if self.confirm_dialog.is_some() {
+            self.handle_confirm_key(key, terminal)
         } else {
             self.handle_instance_key(key, terminal)
         }
+    }
+
+    fn handle_confirm_key<B: Backend>(
+        &mut self,
+        key: KeyEvent,
+        terminal: &mut Terminal<B>,
+    ) -> Result<()> {
+        if self.handle_quit_key(key, terminal)? {
+            return Ok(());
+        }
+        if let Some(mut dialog) = self.confirm_dialog.take() {
+            match dialog.on_key(key) {
+                ConfirmResult::Confirmed => {
+                    let name = dialog.service_name.clone();
+                    match self.usecases.borrow().uninstall_service(&name) {
+                        Ok(()) => {
+                            self.table_service.refresh_current();
+                        }
+                        Err(e) => {
+                            self.report_error(&format!("Failed to uninstall: {e}"))?;
+                        }
+                    }
+                }
+                ConfirmResult::Cancelled => {
+                    // Modal dismissed
+                }
+                ConfirmResult::Pending => {
+                    self.confirm_dialog = Some(dialog);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_create_key<B: Backend>(
+        &mut self,
+        key: KeyEvent,
+        terminal: &mut Terminal<B>,
+    ) -> Result<()> {
+        if self.handle_quit_key(key, terminal)? {
+            return Ok(());
+        }
+        if let Some(mut form) = self.create_form.take() {
+            match form.on_key(key) {
+                CreateServiceResult::Editing => {
+                    self.create_form = Some(form);
+                }
+                CreateServiceResult::Cancelled => {
+                    self.status = Status::List;
+                }
+                CreateServiceResult::Submitted(config) => {
+                    let target_conn = match config.scope {
+                        ServiceScope::User => ConnectionType::Session,
+                        ServiceScope::System => ConnectionType::System,
+                    };
+
+                    if self.active_connection != target_conn {
+                        self.active_connection = target_conn;
+                        self.selected_tab_index = match target_conn {
+                            ConnectionType::System => 0,
+                            ConnectionType::Session => 1,
+                        };
+                        self.table_service.set_active_connection(target_conn);
+                        let _ = self
+                            .usecases
+                            .borrow_mut()
+                            .change_repository_connection(target_conn);
+                    }
+
+                    match self.usecases.borrow().create_service(&config) {
+                        Ok(unit_name) => {
+                            self.table_service.refresh_current();
+                            self.table_service.select_service_by_name(&unit_name);
+                            self.status = Status::Log;
+                            self.event_tx.send(AppEvent::Action(Actions::RefreshLog))?;
+                        }
+                        Err(err) => {
+                            self.report_error(&format!("Failed to create service: {err}"))?;
+                            self.status = Status::List;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn handle_error_key<B: Backend>(
@@ -566,7 +723,7 @@ impl App {
 
     #[allow(clippy::unused_self)]
     fn draw_error_popup(&self, frame: &mut Frame, area: Rect, error_msg: &str) {
-        let user_friendly_message = get_user_friendly_error(error_msg);
+        let user_friendly_message = get_user_friendly_error_i18n(error_msg, self.is_chinese);
         let popup_width = std::cmp::min(70, area.width.saturating_sub(4));
         let popup_height = std::cmp::min(10, area.height.saturating_sub(4));
 
@@ -582,16 +739,19 @@ impl App {
 
         frame.render_widget(Clear, popup_area);
 
+        let error_title = if self.is_chinese { "错误提示 (ERROR)" } else { "ERROR" };
+        let dismiss_text = if self.is_chinese { "按任意键关闭此窗口" } else { "Press any key to dismiss" };
+
         let text = vec![
             Line::from(vec![Span::styled(
-                "ERROR",
+                error_title,
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )]),
             Line::from(""),
             Line::from(user_friendly_message),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Press any key to dismiss",
+                dismiss_text,
                 Style::default().fg(Color::Gray),
             )]),
         ];
@@ -601,12 +761,22 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Red))
-                    .title("Error"),
+                    .title(if self.is_chinese { "错误" } else { "Error" }),
             )
             .alignment(Alignment::Center)
             .wrap(ratatui::widgets::Wrap { trim: true });
 
         frame.render_widget(error_block, popup_area);
+    }
+
+    fn draw_create_status(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            if let Some(form) = &self.create_form {
+                form.render(frame, area);
+            }
+        })?;
+        Ok(())
     }
 
     fn draw_details_status(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
@@ -651,30 +821,34 @@ impl App {
 
             let filter_state = &self.table_service.get_active_filter_state();
 
+            let system_label = if self.is_chinese { "系统服务单元 (System units)" } else { "System units" };
+            let session_label = if self.is_chinese { "用户会话单元 (Session units)" } else { "Session units" };
+            let filter_word = if self.is_chinese { "状态" } else { "Filter" };
+
             let system_tab =
                 if self.selected_tab_index == 0 && *filter_state != ActiveFilterState::All {
                     Line::from(vec![
-                        Span::raw("System units"),
+                        Span::raw(system_label),
                         Span::styled(
-                            format!(" (Filter: {})", filter_state.as_str()),
+                            format!(" ({filter_word}: {})", filter_state.as_str()),
                             Style::default().fg(Color::Gray),
                         ),
                     ])
                 } else {
-                    Line::from("System units")
+                    Line::from(system_label)
                 };
 
             let session_tab =
                 if self.selected_tab_index == 1 && *filter_state != ActiveFilterState::All {
                     Line::from(vec![
-                        Span::raw("Session units"),
+                        Span::raw(session_label),
                         Span::styled(
-                            format!(" (Filter: {})", filter_state.as_str()),
+                            format!(" ({filter_word}: {})", filter_state.as_str()),
                             Style::default().fg(Color::Gray),
                         ),
                     ])
                 } else {
-                    Line::from("Session units")
+                    Line::from(session_label)
                 };
 
             let tabs = Tabs::new(vec![system_tab, session_tab])
@@ -692,6 +866,9 @@ impl App {
             // Show help popup if needed
             if self.show_help {
                 self.draw_help_popup(frame, area);
+            }
+            if let Some(dialog) = &self.confirm_dialog {
+                dialog.render(frame, area);
             }
             self.table_service.render_instance_prompt(frame, area);
         })?;
@@ -784,8 +961,13 @@ impl App {
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
         terminal.show_cursor()?;
 
+        #[cfg(unix)]
         unsafe {
             libc::raise(libc::SIGTSTP);
+        }
+        #[cfg(not(unix))]
+        {
+            // Suspend is not supported on non-unix systems
         }
 
         self.resume_tui(terminal)?;

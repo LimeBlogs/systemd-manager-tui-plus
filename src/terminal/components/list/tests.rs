@@ -66,6 +66,18 @@ impl ServiceRepository for EmptyRepository {
     fn get_active_enter_timestamp(&self, _: &str) -> Result<u64, Box<dyn Error>> {
         Ok(0)
     }
+    fn create_service_file(
+        &self,
+        _: &crate::domain::service_unit::ServiceUnitConfig,
+    ) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+    fn uninstall_service(&self, _: &str) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
+    fn get_unit_file_path(&self, name: &str) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from(format!("/etc/systemd/system/{name}")))
+    }
 }
 
 fn table_with_repository(

@@ -153,4 +153,16 @@ impl ServiceRepository for FakeRepository {
         self.record("timestamp", name)?;
         Ok(self.state.lock().unwrap().timestamp)
     }
+    fn create_service_file(
+        &self,
+        config: &crate::domain::service_unit::ServiceUnitConfig,
+    ) -> Result<(), Box<dyn Error>> {
+        self.record("create_file", &config.unit_file_name())
+    }
+    fn uninstall_service(&self, name: &str) -> Result<(), Box<dyn Error>> {
+        self.record("uninstall", name)
+    }
+    fn get_unit_file_path(&self, name: &str) -> Option<std::path::PathBuf> {
+        Some(std::path::PathBuf::from(format!("/etc/systemd/system/{name}")))
+    }
 }

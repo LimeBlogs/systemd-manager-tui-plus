@@ -22,6 +22,7 @@ pub struct ServiceDetails {
     sender: Sender<AppEvent>,
     scroll: u16,
     usecase: Rc<RefCell<ServicesManager>>,
+    pub is_chinese: bool,
 }
 
 #[cfg(test)]
@@ -36,7 +37,12 @@ impl ServiceDetails {
             unit_file: String::new(),
             scroll: 0,
             usecase,
+            is_chinese: false,
         }
+    }
+
+    pub fn set_chinese(&mut self, is_chinese: bool) {
+        self.is_chinese = is_chinese;
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -127,19 +133,22 @@ impl ServiceDetails {
         }
     }
 
-    #[allow(clippy::unused_self)]
     pub fn shortcuts(&self) -> Vec<Line<'_>> {
-        let help_text = vec![
+        let header = if self.is_chinese { "快捷操作" } else { "Actions" };
+        let hint = if self.is_chinese {
+            "切换Tab: ←/→ | 编辑配置文件: e | 返回列表: q/Esc"
+        } else {
+            "Switch tabs: ←/→ | Edit: e | Go back: q/Esc"
+        };
+        vec![
             Line::from(vec![Span::styled(
-                "Actions",
+                header,
                 Style::default()
                     .fg(Color::LightMagenta)
                     .add_modifier(Modifier::BOLD),
             )]),
-            Line::from("Switch tabs: ←/→ | Edit: e | Go back: q/Esc"),
-        ];
-
-        help_text
+            Line::from(hint),
+        ]
     }
 
     pub fn reset(&mut self) {

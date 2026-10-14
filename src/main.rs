@@ -1,4 +1,5 @@
 mod domain;
+mod i18n;
 mod infrastructure;
 mod terminal;
 #[cfg(test)]
@@ -40,6 +41,10 @@ struct Args {
     /// Disable notifications for failed system and user units
     #[arg(short = 'n', long)]
     no_notifications: bool,
+
+    /// UI language (en or zh, auto-detects from system locale by default)
+    #[arg(short = 'l', long)]
+    lang: Option<String>,
 }
 
 #[derive(Clone)]
@@ -47,14 +52,17 @@ pub struct Config {
     pub filter: String,
     pub operation_timeout: Duration,
     pub failure_notifications: bool,
+    pub language: i18n::Language,
 }
 
 impl From<Args> for Config {
     fn from(args: Args) -> Self {
+        let language = i18n::Language::detect(args.lang.as_deref());
         Self {
             filter: args.filter.unwrap_or_default(),
             operation_timeout: Duration::from_secs(args.operation_timeout_secs),
             failure_notifications: !args.no_notifications,
+            language,
         }
     }
 }

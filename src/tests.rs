@@ -65,3 +65,15 @@ fn cli_rejects_unknown_arguments() {
 
     assert!(result.is_err());
 }
+
+#[test]
+fn cli_accepts_lang_flag() {
+    let args = Args::try_parse_from(["systemd-manager-tui", "--lang", "zh"]).unwrap();
+    let config = Config::from(args);
+    assert_eq!(config.language, crate::i18n::Language::Chinese);
+
+    let args_en = Args::try_parse_from(["systemd-manager-tui", "-l", "en"]).unwrap();
+    let config_en = Config::from(args_en);
+    assert_eq!(config_en.language, crate::i18n::Language::English);
+}
+
