@@ -20,6 +20,7 @@ pub struct Theme {
     pub text_secondary: Color,
     pub text_muted: Color,
     pub text_dim: Color,
+    pub unit_name: Color,     // Muted Slate (深灰青/沉静岩石色，低疲劳)
 
     // Accents & Warmth
     pub accent: Color,        // Warm Sand / Amber (暖木沙)
@@ -58,6 +59,7 @@ impl Theme {
             text_secondary: Color::Rgb(185, 190, 196),
             text_muted: Color::Rgb(138, 146, 154),
             text_dim: Color::Rgb(95, 102, 110),
+            unit_name: Color::Rgb(145, 156, 168),
 
             // Accents: Warm wood, natural amber, slate blue
             accent: Color::Rgb(212, 163, 115),
@@ -90,6 +92,10 @@ impl Theme {
 
     pub fn secondary_style(&self) -> Style {
         Style::default().fg(self.text_secondary)
+    }
+
+    pub fn unit_name_style(&self) -> Style {
+        Style::default().fg(self.unit_name)
     }
 
     pub fn muted_style(&self) -> Style {

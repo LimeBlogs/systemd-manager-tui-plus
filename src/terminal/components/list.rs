@@ -50,8 +50,9 @@ fn build_service_row(
     let file = resolve_file(service, states);
     let theme = Theme::current();
 
-    let highlight_style = theme.primary_style().add_modifier(Modifier::BOLD);
+    let unit_style = theme.unit_name_style();
     let normal_style = theme.secondary_style();
+    let desc_style = theme.muted_style();
 
     let active_cell = if let Some((service_name, label)) = runtime_label
         && service_name == service.name()
@@ -82,11 +83,11 @@ fn build_service_row(
     };
 
     Row::new(vec![
-        Cell::from(service.name().to_string()).style(highlight_style),
+        Cell::from(service.name().to_string()).style(unit_style),
         active_cell,
         Cell::from(file.to_string()).style(file_style),
         Cell::from(service.state().load().to_string()).style(normal_style),
-        Cell::from(service.description().to_string()).style(normal_style),
+        Cell::from(service.description().to_string()).style(desc_style),
     ])
 }
 
