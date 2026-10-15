@@ -309,7 +309,7 @@ fn selected_row_uses_distinct_enabled_and_disabled_colors() {
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.bg == Color::Blue)
+            .any(|cell| cell.bg == Theme::current().selection_bg)
     );
 
     table.set_ignore_key_events(true);
@@ -324,7 +324,7 @@ fn selected_row_uses_distinct_enabled_and_disabled_colors() {
             .buffer()
             .content()
             .iter()
-            .any(|cell| cell.bg == Color::DarkGray)
+            .any(|cell| cell.bg == Theme::current().selection_disabled_bg)
     );
 }
 
@@ -630,7 +630,8 @@ fn rendered_rows_expose_active_state_and_loading_styles() {
         .unwrap();
 
     let cells = terminal.backend().buffer().content();
-    for color in [Color::Green, Color::Yellow, Color::DarkGray, Color::Red] {
+    let theme = Theme::current();
+    for color in [theme.status_active, theme.status_activating, theme.status_inactive, theme.status_failed] {
         assert!(cells.iter().any(|cell| cell.fg == color));
     }
     assert!(cells.iter().any(|cell| {

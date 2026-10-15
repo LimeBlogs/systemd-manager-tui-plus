@@ -3,8 +3,8 @@ use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent, KeyEventKind},
     layout::{Constraint, Layout, Position, Rect},
-    style::{Color, Style, Stylize},
-    text::{Line, Text},
+    style::{Style, Stylize},
+    text::{Line, Span, Text},
     widgets::{Block, Paragraph},
 };
 use std::sync::mpsc::Sender;
@@ -279,16 +279,35 @@ impl Filter {
                 Style::default(),
             ),
         };
+        let theme = crate::terminal::theme::Theme::current();
         let text = Text::from(Line::from(msg)).patch_style(style);
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
 
+        let border_color = match self.input_mode {
+            InputMode::Normal => theme.border,
+            InputMode::Editing => theme.border_focused,
+        };
+
         let input = Paragraph::new(self.input.as_str())
             .style(match self.input_mode {
-                InputMode::Normal => Style::default(),
-                InputMode::Editing => Style::default().fg(Color::Yellow),
+                InputMode::Normal => theme.primary_style(),
+                InputMode::Editing => theme.accent_style(),
             })
-            .block(Block::bordered().title("Filter"));
+            .block(
+                Block::default()
+                    .borders(ratatui::widgets::Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(border_color))
+                    .title(Line::from(Span::styled(
+                        " ⌕ Filter ",
+                        if matches!(self.input_mode, InputMode::Editing) {
+                            theme.accent_style()
+                        } else {
+                            theme.muted_style()
+                        },
+                    ))),
+            );
         frame.render_widget(input, input_area);
         match self.input_mode {
             InputMode::Normal => {}

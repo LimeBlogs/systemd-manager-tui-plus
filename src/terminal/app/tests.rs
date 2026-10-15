@@ -99,7 +99,7 @@ fn help_popup_is_rendered_with_sections_and_highlighted_title() {
         buffer
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "S" && cell.fg == Color::Cyan)
+            .any(|cell| cell.symbol() == "S" && cell.fg == Theme::current().accent)
     );
 }
 

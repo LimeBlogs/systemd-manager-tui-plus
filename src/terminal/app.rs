@@ -13,6 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Tabs};
 use rayon::prelude::*;
+use crate::terminal::theme::{Theme, glyphs};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -511,19 +512,16 @@ impl App {
         let app_title = if self.is_chinese { "程序全局:" } else { "Application:" };
         let close_hint = if self.is_chinese { "按 ? 或任意键关闭此窗口" } else { "Press ? or any key to close" };
 
+        let theme = Theme::current();
         let text = vec![
             Line::from(vec![Span::styled(
                 title,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(""),
             Line::from(vec![Span::styled(
                 nav_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(if self.is_chinese { "↑/k - 向上移动    ↓/j - 向下移动" } else { "↑/k - Move up    ↓/j - Move down" }),
             Line::from(if self.is_chinese { "←/h - 上一个标签页    →/l - 下一个标签页" } else { "←/h - Previous tab    →/l - Next tab" }),
@@ -531,9 +529,7 @@ impl App {
             Line::from(""),
             Line::from(vec![Span::styled(
                 filter_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(if self.is_chinese { "Ctrl+u - 删除至开头" } else { "Ctrl+u - Delete until the start of the input" }),
             Line::from(if self.is_chinese { "Ctrl+k - 删除至末尾" } else { "Ctrl+k - Delete until the end of the input" }),
@@ -541,44 +537,36 @@ impl App {
             Line::from(""),
             Line::from(vec![Span::styled(
                 control_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(if self.is_chinese { "s - 启动服务    x - 停止服务    r - 重启服务" } else { "s - Start service    x - Stop service    r - Restart service" }),
             Line::from(if self.is_chinese { "e - 启用开机自启    d - 禁用开机自启    m - 屏蔽/解除屏蔽" } else { "e - Enable service    d - Disable service    m - Mask/Unmask" }),
-            Line::from(if self.is_chinese { "n - ✨ 新建系统服务 (.service)" } else { "n - Create new systemd service (.service)" }),
-            Line::from(if self.is_chinese { "Del - 🗑️ 卸载并删除自定义服务配置文件" } else { "Del - Uninstall selected custom service file" }),
+            Line::from(if self.is_chinese { "n - 新建系统服务 (.service)" } else { "n - Create new systemd service (.service)" }),
+            Line::from(if self.is_chinese { "Del - 卸载并删除自定义服务配置文件" } else { "Del - Uninstall selected custom service file" }),
             Line::from(if self.is_chinese { "模板 (@.): s/x/r/e/d 提示输入实例名称" } else { "Templates (@.): s/x/r/e/d ask for an instance name" }),
             Line::from(""),
             Line::from(vec![Span::styled(
                 view_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(if self.is_chinese { "f - 切换所有单元/仅服务    a - 循环切换状态过滤" } else { "f - Toggle all/services filter    a - Cycle filter state" }),
             Line::from(if self.is_chinese { "u - 重新读取服务列表" } else { "u - Refresh service list" }),
             Line::from(""),
             Line::from(vec![Span::styled(
                 info_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from(if self.is_chinese { "v - 查看实时日志 (journalctl)    c - 查看单元配置 (cat)" } else { "v - View service logs    c - View unit file details" }),
             Line::from(""),
             Line::from(vec![Span::styled(
                 app_title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                theme.accent_style(),
             )]),
             Line::from("Ctrl+z - Suspend    Ctrl+c - Quit"),
             Line::from(""),
             Line::from(vec![Span::styled(
                 close_hint,
-                Style::default().fg(Color::Gray),
+                theme.muted_style(),
             )]),
         ];
 
@@ -587,9 +575,12 @@ impl App {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::Cyan))
+                    .border_style(Style::default().fg(theme.border_focused))
                     .padding(Padding::new(1, 1, 0, 0))
-                    .title(if self.is_chinese { "帮助" } else { "Help" }),
+                    .title(Line::from(Span::styled(
+                        if self.is_chinese { " 帮助指南 " } else { " Help " },
+                        theme.accent_style(),
+                    ))),
             )
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: true });
@@ -825,13 +816,14 @@ impl App {
             let session_label = if self.is_chinese { "用户会话单元 (Session units)" } else { "Session units" };
             let filter_word = if self.is_chinese { "状态" } else { "Filter" };
 
+            let theme = Theme::current();
             let system_tab =
                 if self.selected_tab_index == 0 && *filter_state != ActiveFilterState::All {
                     Line::from(vec![
                         Span::raw(system_label),
                         Span::styled(
                             format!(" ({filter_word}: {})", filter_state.as_str()),
-                            Style::default().fg(Color::Gray),
+                            theme.dim_style(),
                         ),
                     ])
                 } else {
@@ -844,7 +836,7 @@ impl App {
                         Span::raw(session_label),
                         Span::styled(
                             format!(" ({filter_word}: {})", filter_state.as_str()),
-                            Style::default().fg(Color::Gray),
+                            theme.dim_style(),
                         ),
                     ])
                 } else {
@@ -853,7 +845,9 @@ impl App {
 
             let tabs = Tabs::new(vec![system_tab, session_tab])
                 .select(self.selected_tab_index)
-                .highlight_style(Style::default().fg(Color::Yellow));
+                .divider(glyphs::SEPARATOR)
+                .style(theme.muted_style())
+                .highlight_style(theme.accent_style());
 
             frame.render_widget(tabs, tabs_box);
 
@@ -897,16 +891,23 @@ impl App {
             }
         }
 
+        let theme = Theme::current();
         help_text.push(Line::from(vec![
             Span::styled(
                 "Exit",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                theme.failed_style(),
             ),
             Span::raw(": Ctrl + c"),
         ]));
 
         let help_block = Paragraph::new(help_text)
-            .block(Block::default().title("Shortcuts").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(Line::from(Span::styled(" Shortcuts ", theme.muted_style())))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme.border)),
+            )
             .wrap(ratatui::widgets::Wrap { trim: true });
 
         frame.render_widget(help_block, help_area);

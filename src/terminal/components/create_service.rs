@@ -2,13 +2,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
+    widgets::{Clear, Paragraph},
 };
 
 use crate::domain::service_unit::{RestartPolicy, ServicePresetTemplate, ServiceScope, ServiceUnitConfig};
 use crate::terminal::components::form_fields::{PathField, SelectorField, TextField, ToggleField};
+use crate::terminal::theme::Theme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CreateServiceResult {
@@ -335,20 +336,13 @@ impl CreateServiceForm {
         frame.render_widget(Clear, popup_area);
 
         let title = if self.is_chinese {
-            " ✨ 新建 Systemd 服务单元 (Create Service) ✨ "
+            " 新建服务单元  ·  Create Service Unit "
         } else {
-            " ✨ Create Systemd Service Unit ✨ "
+            " Create Systemd Service Unit "
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
-            .padding(Padding::new(2, 2, 1, 1))
-            .title(Line::from(Span::styled(
-                title,
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            )));
+        let theme = Theme::current();
+        let block = theme.dialog(title);
 
         let inner = block.inner(popup_area);
         frame.render_widget(block, popup_area);
@@ -376,11 +370,11 @@ impl CreateServiceForm {
         // Render each field
         self.render_selector(frame, rows[0], 0, &self.scope_selector.label, self.scope_selector.selected_label(), " [←/→/Space]");
         self.render_selector(frame, rows[1], 1, &self.template_selector.label, self.template_selector.selected_label(), " [←/→/Space]");
-        self.render_text_field(frame, rows[2], 2, &self.service_name.label, self.service_name.value(), &self.service_name.placeholder, self.service_name.cursor);
-        self.render_text_field(frame, rows[3], 3, &self.description.label, self.description.value(), &self.description.placeholder, self.description.cursor);
-        self.render_path_field(frame, rows[4], 4, &self.working_dir.text_field.label, self.working_dir.value(), &self.working_dir.text_field.placeholder, self.working_dir.text_field.cursor);
-        self.render_path_field(frame, rows[5], 5, &self.exec_start.text_field.label, self.exec_start.value(), &self.exec_start.text_field.placeholder, self.exec_start.text_field.cursor);
-        self.render_path_field(frame, rows[6], 6, &self.env_file.text_field.label, self.env_file.value(), &self.env_file.text_field.placeholder, self.env_file.text_field.cursor);
+        self.render_text_field(frame, rows[2], 2, &self.service_name);
+        self.render_text_field(frame, rows[3], 3, &self.description);
+        self.render_path_field(frame, rows[4], 4, &self.working_dir);
+        self.render_path_field(frame, rows[5], 5, &self.exec_start);
+        self.render_path_field(frame, rows[6], 6, &self.env_file);
 
         let user_label = if is_user_mode {
             if self.is_chinese {
@@ -405,40 +399,51 @@ impl CreateServiceForm {
         // Error message / Scope notice row
         if let Some(err) = &self.error {
             let p = Paragraph::new(Line::from(vec![
-                Span::styled("❌ 错误: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                Span::styled(err, Style::default().fg(Color::LightRed)),
+                Span::styled("✕ 错误: ", theme.failed_style()),
+                Span::styled(err, Style::default().fg(theme.status_failed)),
             ]));
             frame.render_widget(p, rows[11]);
         } else if is_user_mode {
             let tip = if self.is_chinese {
-                "💡 提示: 用户服务写入 ~/.config/systemd/user/，免 sudo 密码。注销常驻: loginctl enable-linger"
+                "› 提示: 用户服务写入 ~/.config/systemd/user/，免 sudo 密码。注销常驻: loginctl enable-linger"
             } else {
-                "💡 Tip: Saved to ~/.config/systemd/user/, no sudo needed. Keep after logout: loginctl enable-linger"
+                "› Tip: Saved to ~/.config/systemd/user/, no sudo needed. Keep after logout: loginctl enable-linger"
             };
-            let p = Paragraph::new(Line::from(Span::styled(tip, Style::default().fg(Color::Cyan))));
+            let p = Paragraph::new(Line::from(Span::styled(tip, Style::default().fg(theme.accent_subtle))));
             frame.render_widget(p, rows[11]);
         } else {
             let tip = if self.is_chinese {
-                "💡 提示: 系统服务写入 /etc/systemd/system/，需要 sudo / root 权限"
+                "› 提示: 系统服务写入 /etc/systemd/system/，需要 sudo / root 权限"
             } else {
-                "💡 Tip: System service is written to /etc/systemd/system/, requires sudo / root privileges"
+                "› Tip: System service is written to /etc/systemd/system/, requires sudo / root privileges"
             };
-            let p = Paragraph::new(Line::from(Span::styled(tip, Style::default().fg(Color::DarkGray))));
+            let p = Paragraph::new(Line::from(Span::styled(tip, theme.dim_style())));
             frame.render_widget(p, rows[11]);
         }
 
         // Footer shortcuts
         let footer_text = if self.is_chinese {
-            "[↑/↓] 切换输入框  [Tab] 路径补全  [←/→] 切换选项  [F2/Ctrl+S] 创建服务  [Esc] 取消"
+            "[↑/↓] 切换输入框  ·  [Tab] 路径补全  ·  [←/→] 切换选项  ·  [F2/Ctrl+S] 创建服务  ·  [Esc] 取消"
         } else {
-            "[↑/↓] Switch Field  [Tab] Auto-complete  [←/→] Select  [F2/Ctrl+S] Create  [Esc] Cancel"
+            "[↑/↓] Switch Field  ·  [Tab] Auto-complete  ·  [←/→] Select  ·  [F2/Ctrl+S] Create  ·  [Esc] Cancel"
         };
         let footer = Paragraph::new(Line::from(Span::styled(
             footer_text,
-            Style::default().fg(Color::Gray),
+            theme.muted_style(),
         )))
         .alignment(Alignment::Center);
         frame.render_widget(footer, rows[12]);
+    }
+
+    fn format_label(&self, label: &str) -> String {
+        const TARGET_WIDTH: usize = 20;
+        let width = Line::from(label).width();
+        let pad = if width < TARGET_WIDTH {
+            " ".repeat(TARGET_WIDTH - width)
+        } else {
+            String::new()
+        };
+        format!("{label}{pad}: ")
     }
 
     fn render_text_field(
@@ -446,32 +451,31 @@ impl CreateServiceForm {
         frame: &mut Frame,
         area: Rect,
         field_idx: usize,
-        label: &str,
-        value: &str,
-        placeholder: &str,
-        cursor: usize,
+        field: &TextField,
     ) {
         let is_focused = self.current_field == field_idx;
+        let theme = Theme::current();
         let label_style = if is_focused {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            theme.accent_style()
         } else {
-            Style::default().fg(Color::White)
+            theme.primary_style()
         };
 
         let pointer = if is_focused { "▶ " } else { "  " };
+        let formatted_label = self.format_label(&field.label);
 
-        let display_value = if value.is_empty() {
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray))
+        let display_value = if field.value.is_empty() {
+            Span::styled(&field.placeholder, theme.dim_style())
         } else {
-            Span::styled(value, Style::default().fg(Color::White))
+            Span::styled(&field.value, theme.primary_style())
         };
 
         let line = Line::from(vec![
-            Span::styled(pointer, Style::default().fg(Color::Yellow)),
-            Span::styled(format!("{label:<18}: "), label_style),
-            Span::styled("[ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(pointer, Style::default().fg(theme.accent)),
+            Span::styled(formatted_label, label_style),
+            Span::styled("[ ", Style::default().fg(theme.border)),
             display_value,
-            Span::styled(" ]", Style::default().fg(Color::DarkGray)),
+            Span::styled(" ]", Style::default().fg(theme.border)),
         ]);
 
         let p = Paragraph::new(line);
@@ -479,9 +483,12 @@ impl CreateServiceForm {
 
         // Show cursor if focused
         if is_focused {
-            let label_len = 2 + 18 + 2 + 2; // pointer + label + colon-space + "[ "
-            let cursor_x = area.x + label_len as u16 + cursor as u16;
-            if cursor_x < area.x + area.width {
+            const PREFIX_WIDTH: u16 = 2 + 20 + 2 + 2; // pointer (2) + formatted_label (22) + "[ " (2) = 26
+            let byte_idx = field.byte_index();
+            let text_before_cursor = &field.value[..byte_idx];
+            let cursor_offset = Line::from(text_before_cursor).width() as u16;
+            let cursor_x = area.x + PREFIX_WIDTH + cursor_offset;
+            if cursor_x < area.x + area.width.saturating_sub(1) {
                 frame.set_cursor_position((cursor_x, area.y));
             }
         }
@@ -492,38 +499,41 @@ impl CreateServiceForm {
         frame: &mut Frame,
         area: Rect,
         field_idx: usize,
-        label: &str,
-        value: &str,
-        placeholder: &str,
-        cursor: usize,
+        field: &PathField,
     ) {
         let is_focused = self.current_field == field_idx;
+        let theme = Theme::current();
         let label_style = if is_focused {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            theme.accent_style()
         } else {
-            Style::default().fg(Color::White)
+            theme.primary_style()
         };
 
         let pointer = if is_focused { "▶ " } else { "  " };
+        let formatted_label = self.format_label(&field.text_field.label);
 
-        let display_value = if value.is_empty() {
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray))
+        let display_value = if field.value().is_empty() {
+            Span::styled(&field.text_field.placeholder, theme.dim_style())
         } else {
-            Span::styled(value, Style::default().fg(Color::White))
+            Span::styled(field.value(), theme.primary_style())
         };
 
         let tab_hint = if is_focused {
-            Span::styled(" (Tab ⇥ 补全)", Style::default().fg(Color::DarkGray))
+            if self.is_chinese {
+                Span::styled(" (Tab ⇥ 补全)", theme.dim_style())
+            } else {
+                Span::styled(" (Tab ⇥ Complete)", theme.dim_style())
+            }
         } else {
             Span::raw("")
         };
 
         let line = Line::from(vec![
-            Span::styled(pointer, Style::default().fg(Color::Yellow)),
-            Span::styled(format!("{label:<18}: "), label_style),
-            Span::styled("[ ", Style::default().fg(Color::DarkGray)),
+            Span::styled(pointer, Style::default().fg(theme.accent)),
+            Span::styled(formatted_label, label_style),
+            Span::styled("[ ", Style::default().fg(theme.border)),
             display_value,
-            Span::styled(" ]", Style::default().fg(Color::DarkGray)),
+            Span::styled(" ]", Style::default().fg(theme.border)),
             tab_hint,
         ]);
 
@@ -531,9 +541,12 @@ impl CreateServiceForm {
         frame.render_widget(p, area);
 
         if is_focused {
-            let label_len = 2 + 18 + 2 + 2;
-            let cursor_x = area.x + label_len as u16 + cursor as u16;
-            if cursor_x < area.x + area.width {
+            const PREFIX_WIDTH: u16 = 2 + 20 + 2 + 2; // pointer (2) + formatted_label (22) + "[ " (2) = 26
+            let byte_idx = field.text_field.byte_index();
+            let text_before_cursor = &field.value()[..byte_idx];
+            let cursor_offset = Line::from(text_before_cursor).width() as u16;
+            let cursor_x = area.x + PREFIX_WIDTH + cursor_offset;
+            if cursor_x < area.x + area.width.saturating_sub(1) {
                 frame.set_cursor_position((cursor_x, area.y));
             }
         }
@@ -549,21 +562,23 @@ impl CreateServiceForm {
         hint: &str,
     ) {
         let is_focused = self.current_field == field_idx;
+        let theme = Theme::current();
         let label_style = if is_focused {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            theme.accent_style()
         } else {
-            Style::default().fg(Color::White)
+            theme.primary_style()
         };
 
         let pointer = if is_focused { "▶ " } else { "  " };
+        let formatted_label = self.format_label(label);
 
         let line = Line::from(vec![
-            Span::styled(pointer, Style::default().fg(Color::Yellow)),
-            Span::styled(format!("{label:<18}: "), label_style),
-            Span::styled("◀ ", Style::default().fg(if is_focused { Color::Cyan } else { Color::DarkGray })),
-            Span::styled(selected_label, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::styled(" ▶", Style::default().fg(if is_focused { Color::Cyan } else { Color::DarkGray })),
-            Span::styled(if is_focused { hint } else { "" }, Style::default().fg(Color::DarkGray)),
+            Span::styled(pointer, Style::default().fg(theme.accent)),
+            Span::styled(formatted_label, label_style),
+            Span::styled("◀ ", Style::default().fg(if is_focused { theme.accent_subtle } else { theme.border })),
+            Span::styled(selected_label, if is_focused { theme.active_style() } else { theme.primary_style() }),
+            Span::styled(" ▶", Style::default().fg(if is_focused { theme.accent_subtle } else { theme.border })),
+            Span::styled(if is_focused { hint } else { "" }, theme.dim_style()),
         ]);
 
         let p = Paragraph::new(line);
@@ -579,25 +594,33 @@ impl CreateServiceForm {
         value: bool,
     ) {
         let is_focused = self.current_field == field_idx;
+        let theme = Theme::current();
         let label_style = if is_focused {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            theme.accent_style()
         } else {
-            Style::default().fg(Color::White)
+            theme.primary_style()
         };
 
         let pointer = if is_focused { "▶ " } else { "  " };
+        let formatted_label = self.format_label(label);
 
         let status_span = if value {
-            Span::styled("[ ✔ 是 (Yes) ]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            Span::styled("[ ✓ 是 (Yes) ]", theme.active_style())
         } else {
-            Span::styled("[ ✖ 否 (No)  ]", Style::default().fg(Color::Red))
+            Span::styled("[ ─ 否 (No)  ]", theme.muted_style())
+        };
+
+        let hint_text = if is_focused {
+            if self.is_chinese { " [Space 切换]" } else { " [Space Toggle]" }
+        } else {
+            ""
         };
 
         let line = Line::from(vec![
-            Span::styled(pointer, Style::default().fg(Color::Yellow)),
-            Span::styled(format!("{label:<18}: "), label_style),
+            Span::styled(pointer, Style::default().fg(theme.accent)),
+            Span::styled(formatted_label, label_style),
             status_span,
-            Span::styled(if is_focused { " [Space 切换]" } else { "" }, Style::default().fg(Color::DarkGray)),
+            Span::styled(hint_text, theme.dim_style()),
         ]);
 
         let p = Paragraph::new(line);
@@ -725,6 +748,46 @@ mod tests {
         let mut form = CreateServiceForm::new(true, ServiceScope::User);
         let result = form.on_key(make_key(KeyCode::Esc));
         assert_eq!(result, CreateServiceResult::Cancelled);
+    }
+
+    #[test]
+    fn cursor_position_aligns_with_unicode_labels_and_values() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut form = CreateServiceForm::new(true, ServiceScope::User);
+        // Field 2 is service_name
+        form.current_field = 2;
+
+        let backend = TestBackend::new(100, 35);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // 1. Empty field: cursor must be right after "[ "
+        terminal.draw(|f| form.render(f, f.area())).unwrap();
+        // Popup area: width = min(84, 96) = 84, x = (100 - 84)/2 = 8.
+        // Inner area has border 1 and padding left 2, so inner.x = 8 + 1 + 2 = 11.
+        // PREFIX_WIDTH = 26 (pointer 2 + formatted_label 22 + "[ " 2)
+        // Expected cursor_x = 11 + 26 = 37.
+        let (cx, _cy) = terminal.get_cursor_position().unwrap().into();
+        assert_eq!(cx, 37);
+
+        // 2. ASCII text "test": cursor at end should advance by 4
+        form.service_name.set_value("test");
+        terminal.draw(|f| form.render(f, f.area())).unwrap();
+        let (cx, _) = terminal.get_cursor_position().unwrap().into();
+        assert_eq!(cx, 37 + 4);
+
+        // 3. Wide Chinese text "网关": width is 4, cursor should advance by 4
+        form.service_name.set_value("网关");
+        terminal.draw(|f| form.render(f, f.area())).unwrap();
+        let (cx, _) = terminal.get_cursor_position().unwrap().into();
+        assert_eq!(cx, 37 + 4);
+
+        // 4. Moving cursor left by 1 character (before "关") should be at 37 + 2 = 39
+        form.service_name.handle_key(make_key(KeyCode::Left));
+        terminal.draw(|f| form.render(f, f.area())).unwrap();
+        let (cx, _) = terminal.get_cursor_position().unwrap().into();
+        assert_eq!(cx, 37 + 2);
     }
 }
 

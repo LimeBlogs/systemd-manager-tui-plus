@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
 };
@@ -75,37 +75,39 @@ impl ConfirmDialog {
             "[ y / Enter ] Confirm      [ n / Esc ] Cancel"
         };
 
+        let theme = crate::terminal::theme::Theme::current();
+
         let lines = vec![
             Line::from(""),
             Line::from(vec![
                 Span::styled(
                     if self.is_chinese { "目标服务: " } else { "Service: " },
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    theme.accent_style(),
                 ),
                 Span::styled(
                     &self.service_name,
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    theme.primary_style().add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
                     if self.is_chinese { "文件路径: " } else { "File: " },
-                    Style::default().fg(Color::Yellow),
+                    theme.muted_style(),
                 ),
                 Span::styled(
                     &self.file_path,
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(theme.accent_subtle),
                 ),
             ]),
             Line::from(""),
             Line::from(vec![Span::styled(
                 warning_text,
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                theme.failed_style(),
             )]),
             Line::from(""),
             Line::from(vec![Span::styled(
                 confirm_hint,
-                Style::default().fg(Color::LightYellow).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             )]),
         ];
 
@@ -114,11 +116,11 @@ impl ConfirmDialog {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::Red))
+                    .border_style(Style::default().fg(theme.status_failed))
                     .padding(Padding::new(2, 2, 0, 0))
                     .title(Line::from(Span::styled(
                         format!(" {} ", self.title),
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        theme.failed_style(),
                     ))),
             )
             .alignment(Alignment::Center);

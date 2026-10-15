@@ -119,7 +119,7 @@ fn editing_mode_changes_visual_help_and_input_color() {
         buffer
             .content()
             .iter()
-            .any(|cell| cell.symbol() == "d" && cell.fg == Color::Yellow)
+            .any(|cell| cell.symbol() == "d" && cell.fg == crate::terminal::theme::Theme::current().accent)
     );
 }
 

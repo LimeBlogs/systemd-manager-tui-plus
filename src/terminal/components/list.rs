@@ -25,6 +25,7 @@ use crate::Config;
 use crate::domain::connection_type::ConnectionType;
 use crate::domain::service::Service;
 use crate::terminal::app::{Actions, AppEvent, ServiceRequestContext};
+use crate::terminal::theme::{Theme, glyphs};
 
 const PADDING: Padding = Padding::new(1, 1, 1, 1);
 const WORKER_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -47,35 +48,34 @@ fn build_service_row(
     runtime_label: Option<(&str, &str)>,
 ) -> Row<'static> {
     let file = resolve_file(service, states);
+    let theme = Theme::current();
 
-    let highlight_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
-    let normal_style = Style::default().fg(Color::Gray);
+    let highlight_style = theme.primary_style().add_modifier(Modifier::BOLD);
+    let normal_style = theme.secondary_style();
 
     let active_cell = if let Some((service_name, label)) = runtime_label
         && service_name == service.name()
     {
-        Cell::from(label.to_string()).style(Style::default().fg(Color::Green))
+        Cell::from(format!("{}{label}", glyphs::STATUS_ACTIVE)).style(theme.active_style())
     } else {
-        let state_style = match service.state().active() {
-            "active" => Style::default().fg(Color::Green),
-            "activating" => Style::default().fg(Color::Yellow),
-            "inactive" => Style::default().fg(Color::DarkGray),
-            _ => Style::default().fg(Color::Red),
+        let (glyph, state_style) = match service.state().active() {
+            "active" => (glyphs::STATUS_ACTIVE, theme.active_style()),
+            "activating" => (glyphs::STATUS_ACTIVATING, theme.activating_style()),
+            "inactive" => (glyphs::STATUS_INACTIVE, theme.inactive_style()),
+            _ => (glyphs::STATUS_FAILED, theme.failed_style()),
         };
         let sub = service.state().sub();
         let active = if sub.is_empty() {
-            service.state().active().to_string()
+            format!("{glyph}{}", service.state().active())
         } else {
-            format!("{} ({})", service.state().active(), sub)
+            format!("{glyph}{} ({})", service.state().active(), sub)
         };
         Cell::from(active).style(state_style)
     };
 
     let file_style = if file == LOADING_PLACEHOLDER {
         Style::default()
-            .fg(Color::Gray)
+            .fg(theme.text_dim)
             .add_modifier(Modifier::ITALIC | Modifier::DIM)
     } else {
         normal_style
@@ -102,6 +102,7 @@ fn generate_rows(
 }
 
 fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool, is_chinese: bool) -> Table<'a> {
+    let theme = Theme::current();
     let headers = if is_chinese {
         ["服务单元 (UNIT)", "运行状态 (ACTIVE)", "自启状态 (FILE)", "加载状态 (LOAD)", "服务描述 (DESCRIPTION)"]
     } else {
@@ -111,7 +112,7 @@ fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool, is_chinese: 
         rows.to_owned(),
         [
             Constraint::Percentage(20),
-            Constraint::Length(20),
+            Constraint::Length(22),
             Constraint::Length(10),
             Constraint::Length(10),
             Constraint::Min(0),
@@ -119,27 +120,15 @@ fn generate_table<'a>(rows: &'a [Row<'a>], ignore_key_events: bool, is_chinese: 
     )
     .header(
         Row::new(headers).style(
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::BOLD),
+            theme.muted_style().add_modifier(Modifier::BOLD),
         ),
     )
     .block(Block::default().borders(Borders::NONE).padding(PADDING))
-    .row_highlight_style(
-        Style::default()
-            .bg(Color::Blue)
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    )
-    .highlight_symbol(">> ");
+    .row_highlight_style(theme.selection_style())
+    .highlight_symbol(glyphs::SELECTION_RAIL);
 
     if ignore_key_events {
-        table = table.row_highlight_style(
-            Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        );
+        table = table.row_highlight_style(theme.selection_disabled_style());
     }
 
     table
